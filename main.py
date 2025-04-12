@@ -1,379 +1,223 @@
 import pygame
-import sys
 import math
 import random
 
 pygame.init()
 WIDTH, HEIGHT = 800, 600
-window = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Boids - Single Agent ali Flock Mode (z nadgradnjami + ovire)")
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Flocking Simulation")
 clock = pygame.time.Clock()
+font = pygame.font.SysFont(None, 36)
 
-# Colors
-BELA = (255, 255, 255)
-CRNA = (0, 0, 0)
-MODRA = (0, 0, 255)
-RDECA = (255, 0, 0)
+MAX_SPEED = 5.0
+MAX_FORCE = 0.03
+NEIGHBOR_RADIUS = 50
+DESIRED_SEPARATION = 25
+target_pos = None
 
-NUM_AGENTS_BLUE = 12
-NUM_AGENTS_RED = 12
-
-# (center_x, center_y, radius)
-obstacles = [
-    (400, 300, 60),
-    (200, 200, 40),
-    (600, 400, 30),
-]
-
-class Agent:
-    FOV_ANGLE = 120  # field of view in degrees
-
-    def __init__(self, x, y, color=MODRA):
-        self.pos = pygame.math.Vector2(x, y)
+class Boid:
+    def __init__(self, x, y, color):
+        self.position = pygame.math.Vector2(x, y)
         angle = random.uniform(0, 2 * math.pi)
-        self.vel = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * 2
-        self.acc = pygame.math.Vector2(0, 0)
-        self.max_speed = 4.0
-        self.max_force = 0.1
-        self.wander_angle = random.uniform(0, 2 * math.pi)
+        self.velocity = pygame.math.Vector2(math.cos(angle), math.sin(angle))
+        self.acceleration = pygame.math.Vector2(0, 0)
+        self.max_speed = MAX_SPEED
+        self.max_force = MAX_FORCE
+        self.size = 5
         self.color = color
 
-    def update(self):
-        self.vel += self.acc
-        if self.vel.length() > self.max_speed:
-            self.vel.scale_to_length(self.max_speed)
-        self.pos += self.vel
-        self.acc.update(0, 0)
+    def run(self, boids):
+        self.flock(boids)
+        if target_pos:
+            steer_to_target = self.arrive(target_pos)
+            self.applyForce(steer_to_target)
+        self.update()
+        self.borders()
+        self.render()
 
-    def apply_force(self, force):
-        self.acc += force
+    def applyForce(self, force):
+        self.acceleration += force
 
-    def in_view(self, other, angle_fov=FOV_ANGLE, neighbor_radius=50):
-        """Returns True if 'other' agent is within this agent's FOV and neighbor distance."""
-        diff = other.pos - self.pos
-        dist = diff.length()
-        if dist > neighbor_radius or dist == 0:
-            return False
-
-        direction = self.vel
-        if direction.length() == 0:
-            direction = pygame.math.Vector2(0, -1)
-        angle = direction.angle_to(diff)
-        return abs(angle) <= (angle_fov / 2)
-
-    def seek(self, target):
-        desired = target - self.pos
-        if desired.length() > 0:
-            desired = desired.normalize() * self.max_speed
-        steer = desired - self.vel
-        if steer.length() > self.max_force:
-            steer = steer.normalize() * self.max_force
-        return steer
-
-    def arrive(self, target, slowing_radius=100):
-        desired = target - self.pos
-        dist = desired.length()
-        if dist > 0:
-            desired_normalized = desired.normalize()
-            if dist < slowing_radius:
-                # Slow down as we approach
-                desired_normalized *= (self.max_speed * (dist / slowing_radius))
-            else:
-                desired_normalized *= self.max_speed
-
-            steer = desired_normalized - self.vel
-            if steer.length() > self.max_force:
-                steer = steer.normalize() * self.max_force
-            return steer
-        return pygame.math.Vector2(0, 0)
-
-    def wander(self):
-        circle_dist = 40.0  
-        circle_radius = 30.0  
-
-        # If velocity is zero, give it a small "forward" nudge
-        if self.vel.length() == 0:
-            self.vel.from_polar((1, 0))
-
-        circle_center = self.vel.normalize() * circle_dist
-
-        self.wander_angle += random.uniform(-0.3, 0.3)
-        x = math.cos(self.wander_angle) * circle_radius
-        y = math.sin(self.wander_angle) * circle_radius
-        wander_force = circle_center + pygame.math.Vector2(x, y)
-
-        desired = self.vel + wander_force
-        if desired.length() > self.max_speed:
-            desired.scale_to_length(self.max_speed)
-
-        steer = desired - self.vel
-        if steer.length() > self.max_force:
-            steer = steer.normalize() * self.max_force
-        return steer
-
-    def avoid_obstacles(self, obstacles):
-        """
-        Steer away from obstacles. The closer we are, the stronger the push.
-        """
-        steer = pygame.math.Vector2(0, 0)
-        for (ox, oy, r) in obstacles:
-            obstacle_center = pygame.math.Vector2(ox, oy)
-            diff = self.pos - obstacle_center
-            dist = diff.length()
-
-            safe_radius = r + 30  # how far we consider 'danger' from the obstacle
-            if 0 < dist < safe_radius:
-                # Overlap is how far into the "danger" zone we are
-                overlap = (safe_radius - dist)
-                # Increase repulsion based on overlap
-                diff = diff.normalize() * overlap
-                steer += diff
-
-        if steer.length() > 0:
-            steer = steer.normalize() * self.max_speed
-            steer -= self.vel
-            if steer.length() > self.max_force:
-                steer = steer.normalize() * self.max_force
-        return steer
-
-    def separation(self, agent_list, desired_separation=25, neighbor_radius=50):
-        """
-        Separation from all given agents (can include same color or other color).
-        """
-        steer = pygame.math.Vector2(0, 0)
-        count = 0
-        for other in agent_list:
-            if other is self:
-                continue
-            if not self.in_view(other, self.FOV_ANGLE, neighbor_radius):
-                continue
-            diff = self.pos - other.pos
-            dist = diff.length()
-            if 0 < dist < desired_separation:
-                diff = diff.normalize() / dist
-                steer += diff
-                count += 1
-
-        if count > 0:
-            steer /= count
-
-        if steer.length() > 0:
-            steer = steer.normalize() * self.max_speed - self.vel
-            if steer.length() > self.max_force:
-                steer = steer.normalize() * self.max_force
-        return steer
-
-    def alignment(self, same_color_agents, neighbor_radius=50):
-        """
-        Alignment only with agents of the same color (same_color_agents).
-        """
-        avg_vel = pygame.math.Vector2(0, 0)
-        count = 0
-        for other in same_color_agents:
-            if other is self:
-                continue
-            if not self.in_view(other, self.FOV_ANGLE, neighbor_radius):
-                continue
-            avg_vel += other.vel
-            count += 1
-
-        if count > 0:
-            avg_vel /= count
-            avg_vel = avg_vel.normalize() * self.max_speed
-            steer = avg_vel - self.vel
-            if steer.length() > self.max_force:
-                steer = steer.normalize() * self.max_force
-            return steer
-        return pygame.math.Vector2(0, 0)
-
-    def cohesion(self, same_color_agents, neighbor_radius=50):
-        """
-        Cohesion only with agents of the same color (same_color_agents).
-        """
-        center_of_mass = pygame.math.Vector2(0, 0)
-        count = 0
-        for other in same_color_agents:
-            if other is self:
-                continue
-            if not self.in_view(other, self.FOV_ANGLE, neighbor_radius):
-                continue
-            center_of_mass += other.pos
-            count += 1
-
-        if count > 0:
-            center_of_mass /= count
-            desired = center_of_mass - self.pos
-            if desired.length() > 0:
-                desired = desired.normalize() * self.max_speed
-            steer = desired - self.vel
-            if steer.length() > self.max_force:
-                steer = steer.normalize() * self.max_force
-            return steer
-        return pygame.math.Vector2(0, 0)
-
-    def boids_flock_multicolor(self, same_color_agents, all_agents):
-        """
-        1) Separate from *all* agents (own color + other color)
-        2) Align with own color only
-        3) Cohere with own color only
-        """
-        sep = self.separation(all_agents, desired_separation=25, neighbor_radius=50)
-        ali = self.alignment(same_color_agents, neighbor_radius=50)
-        coh = self.cohesion(same_color_agents, neighbor_radius=50)
-
-        # Weight each force
-        sep *= 1.5  
+    def flock(self, boids):
+        sep = self.separate(boids)
+        ali = self.align(boids)
+        coh = self.cohesion(boids)
+        sep *= 1.5
         ali *= 1.0
         coh *= 1.0
+        self.applyForce(sep)
+        self.applyForce(ali)
+        self.applyForce(coh)
 
-        return sep + ali + coh
+    def update(self):
+        self.velocity += self.acceleration
+        if self.velocity.length_squared() > self.max_speed ** 2:
+            self.velocity.scale_to_length(self.max_speed)
+        self.position += self.velocity
+        self.acceleration.update(0, 0)
 
-    def bounce_inside(self, width, height):
-        if self.pos.x < 0:
-            self.pos.x = 0
-            self.vel.x *= -1
-        elif self.pos.x > width:
-            self.pos.x = width
-            self.vel.x *= -1
+    def borders(self):
+        if self.position.x < 0 or self.position.x > WIDTH:
+            self.velocity.x *= -1
+        if self.position.y < 0 or self.position.y > HEIGHT:
+            self.velocity.y *= -1
+        self.position.x = max(0, min(WIDTH, self.position.x))
+        self.position.y = max(0, min(HEIGHT, self.position.y))
 
-        if self.pos.y < 0:
-            self.pos.y = 0
-            self.vel.y *= -1
-        elif self.pos.y > height:
-            self.pos.y = height
-            self.vel.y *= -1
+    def render(self):
+        angle = math.atan2(self.velocity.y, self.velocity.x) + math.pi / 2
+        cosA, sinA = math.cos(angle), math.sin(angle)
+        tip = pygame.math.Vector2(0, -2 * self.size)
+        left = pygame.math.Vector2(-self.size, 2 * self.size)
+        right = pygame.math.Vector2(self.size, 2 * self.size)
+        def rotate(v): return (self.position.x + v.x * cosA - v.y * sinA,
+                               self.position.y + v.x * sinA + v.y * cosA)
+        points = [rotate(tip), rotate(left), rotate(right)]
+        pygame.draw.polygon(screen, self.color, points)
 
-    def draw(self, surface):
-        # Rotate a small triangle in the direction of velocity
-        angle_degrees = 0
-        if self.vel.length() > 0:
-            base_direction = pygame.math.Vector2(0, -1)
-            angle_degrees = base_direction.angle_to(self.vel)
+    def separate(self, boids):
+        steer = pygame.math.Vector2(0, 0)
+        count = 0
+        for other in boids:
+            if other is self:
+                continue
+            dist = self.position.distance_to(other.position)
+            if 0 < dist < DESIRED_SEPARATION:
+                steer += (self.position - other.position).normalize() / dist
+                count += 1
+        if count > 0:
+            steer /= count
+            steer.scale_to_length(self.max_speed)
+            steer -= self.velocity
+            if steer.length_squared() > self.max_force ** 2:
+                steer.scale_to_length(self.max_force)
+        return steer
 
-        size = 12
-        half_base = 6
+    def align(self, boids):
+        avg = pygame.math.Vector2(0, 0)
+        count = 0
+        for other in boids:
+            if other is self:
+                continue
+            if self.position.distance_to(other.position) < NEIGHBOR_RADIUS:
+                avg += other.velocity
+                count += 1
+        if count > 0:
+            avg /= count
+            avg.scale_to_length(self.max_speed)
+            steer = avg - self.velocity
+            if steer.length_squared() > self.max_force ** 2:
+                steer.scale_to_length(self.max_force)
+            return steer
+        return pygame.math.Vector2(0, 0)
 
-        points = [
-            (0, -size),      # Tip
-            (-half_base, 0), # Left
-            (half_base, 0)   # Right
-        ]
+    def cohesion(self, boids):
+        center = pygame.math.Vector2(0, 0)
+        count = 0
+        for other in boids:
+            if other is self:
+                continue
+            if self.position.distance_to(other.position) < NEIGHBOR_RADIUS:
+                center += other.position
+                count += 1
+        if count > 0:
+            center /= count
+            desired = center - self.position
+            if desired.length_squared() > 0:
+                desired.scale_to_length(self.max_speed)
+                steer = desired - self.velocity
+                if steer.length_squared() > self.max_force ** 2:
+                    steer.scale_to_length(self.max_force)
+                return steer
+        return pygame.math.Vector2(0, 0)
 
-        rotated_points = []
-        rad = math.radians(angle_degrees)
-        cosA = math.cos(rad)
-        sinA = math.sin(rad)
-
-        for px, py in points:
-            rx = px * cosA - py * sinA
-            ry = px * sinA + py * cosA
-            rx += self.pos.x
-            ry += self.pos.y
-            rotated_points.append((rx, ry))
-
-        pygame.draw.polygon(surface, self.color, rotated_points)
-
-def create_flock(num_agents, color=MODRA):
-    flock = []
-    for _ in range(num_agents):
-        x = random.randint(0, WIDTH)
-        y = random.randint(0, HEIGHT)
-        flock.append(Agent(x, y, color=color))
-    return flock
-
-def create_single_agent():
-    x = WIDTH // 2
-    y = HEIGHT // 2
-    return [Agent(x, y, color=MODRA)]
-
-def draw_obstacles(surface, obstacles):
-    for (ox, oy, r) in obstacles:
-        pygame.draw.circle(surface, (100, 200, 100), (int(ox), int(oy)), r)
-
-mode = 'flock'
-agents_blue = create_flock(NUM_AGENTS_BLUE, color=MODRA)
-agents_red = create_flock(NUM_AGENTS_RED, color=RDECA)
-
-target_pos = None
-running = True
-
-def update_and_draw_flock(own_flock, all_agents):
-    # We collect the forces separately, then apply them to each agent
-    forces = []
-    for a in own_flock:
-        # Boids flocking with same color but separating from *all* agents
-        flock_force = a.boids_flock_multicolor(
-            same_color_agents=own_flock,
-            all_agents=all_agents
-        )
-
-        # If there's a target, arrive; otherwise wander
-        if target_pos is not None:
-            arrive_force = a.arrive(target_pos)
-            combined_force = flock_force + arrive_force
+    def arrive(self, target):
+        desired = pygame.math.Vector2(target) - self.position
+        dist = desired.length()
+        if dist < 100:
+            desired.scale_to_length(max((dist / 100) * self.max_speed, 0.01))
         else:
-            wander_force = a.wander()
-            combined_force = flock_force + wander_force
+            desired.scale_to_length(self.max_speed)
+        steer = desired - self.velocity
+        if steer.length_squared() > self.max_force ** 2:
+            steer.scale_to_length(self.max_force)
+        return steer
 
-        # Avoid obstacles
-        avoid_force = a.avoid_obstacles(obstacles)
+class Flock:
+    def __init__(self):
+        self.boids = []
 
-        # Combine everything
-        total_force = combined_force + avoid_force
+    def addBoid(self, boid):
+        self.boids.append(boid)
 
-        # Optional clamp
-        if total_force.length() > a.max_force * 2:
-            total_force = total_force.normalize() * (a.max_force * 2)
+    def run(self):
+        for boid in self.boids:
+            boid.run(self.boids)
 
-        forces.append(total_force)
+def draw_button(rect, text, hover=False):
+    color = (100, 100, 255) if hover else (70, 70, 200)
+    pygame.draw.rect(screen, color, rect)
+    label = font.render(text, True, (255, 255, 255))
+    label_rect = label.get_rect(center=rect.center)
+    screen.blit(label, label_rect)
 
-    # Apply and update each agent
-    for i, a in enumerate(own_flock):
-        a.apply_force(forces[i])
-        a.update()
-        a.bounce_inside(WIDTH, HEIGHT)
-        a.draw(window)
+def mode_selection_menu():
+    button_single = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 - 70, 240, 50)
+    button_flock = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 20, 240, 50)
+    while True:
+        screen.fill((20, 20, 20))
+        mx, my = pygame.mouse.get_pos()
+        hover_single = button_single.collidepoint(mx, my)
+        hover_flock = button_flock.collidepoint(mx, my)
+        draw_button(button_single, "Single Boid Mode", hover_single)
+        draw_button(button_flock, "Flock Mode", hover_flock)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if hover_single:
+                    return "single"
+                elif hover_flock:
+                    return "flock"
+        pygame.display.flip()
+        clock.tick(60)
 
+mode = mode_selection_menu()
+
+flock_red = Flock()
+flock_blue = Flock()
+
+if mode == "single":
+    flock_red.addBoid(Boid(WIDTH / 2, HEIGHT / 2, (255, 255, 0)))
+else:
+    centerX, centerY = WIDTH / 2, HEIGHT / 2
+    spawn_radius = 50
+    num_boids = 40
+    for i in range(num_boids):
+        x = random.uniform(centerX - spawn_radius, centerX + spawn_radius)
+        y = random.uniform(centerY - spawn_radius, centerY + spawn_radius)
+        color = (255, 50, 50) if i % 2 == 0 else (50, 50, 255)
+        boid = Boid(x, y, color)
+        (flock_red if i % 2 == 0 else flock_blue).addBoid(boid)
+
+running = True
 while running:
     clock.tick(60)
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_1:
-                mode = 'single'
-                agents_blue = create_single_agent()
-                agents_red = []
-                target_pos = None
-            elif event.key == pygame.K_2:
-                mode = 'flock'
-                agents_blue = create_flock(NUM_AGENTS_BLUE, MODRA)
-                agents_red = create_flock(NUM_AGENTS_RED, RDECA)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:
+                target_pos = pygame.mouse.get_pos()
+            elif event.button == 3:
                 target_pos = None
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mx, my = pygame.mouse.get_pos()
-            target_pos = pygame.math.Vector2(mx, my)
-
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            target_pos = None
-
-    window.fill(BELA)
-    draw_obstacles(window, obstacles)
-
-    # Draw the target if it exists
-    if target_pos is not None:
-        pygame.draw.circle(window, CRNA, (int(target_pos.x), int(target_pos.y)), 6)
-
-    # Combine both flocks for separation checking
-    all_agents = agents_blue + agents_red
-
-    # Update and draw: each flock uses the same all_agents for separation
-    update_and_draw_flock(agents_blue, all_agents)
-    update_and_draw_flock(agents_red, all_agents)
-
+    screen.fill((30, 30, 30))
+    flock_red.run()
+    flock_blue.run()
+    if target_pos:
+        pygame.draw.circle(screen, (255, 255, 0), target_pos, 5)
     pygame.display.flip()
 
 pygame.quit()
-sys.exit()
