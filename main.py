@@ -15,12 +15,18 @@ class Boid:
         self.radius = radius
         self.width = width
         self.height = height
+        self.wander_theta = random.uniform(0, 2 * math.pi)
 
     def seek(self, target):
         desired = target - self.position
-        if desired.length() == 0:
+        dist = desired.length()
+        if dist == 0:
             return Vector2(0, 0)
-        desired = desired.normalize() * self.max_speed
+        desired = desired.normalize()
+        if dist < 100:
+            desired *= self.max_speed * (dist / 100) 
+        else:
+            desired *= self.max_speed
         steer = desired - self.velocity
         if steer.length() > self.max_force:
             steer = steer.normalize() * self.max_force
@@ -80,7 +86,7 @@ class Boid:
         return Vector2(0, 0)
 
     def cohesion(self, boids):
-        neighbor_dist = 50
+        neighbor_dist = 250
         center_of_mass = Vector2(0, 0)
         count = 0
         for other in boids:
@@ -96,15 +102,28 @@ class Boid:
         return Vector2(0, 0)
 
     def flock(self, boids, avoid_others=None):
-        sep = self.separate(boids) * 1.5
+        sep = self.separate(boids) * 1.9
         ali = self.align(boids) * 0.8
         coh = self.cohesion(boids) * 1
         self.acceleration = Vector2(0, 0)
         self.acceleration += sep + ali + coh
         if avoid_others:
-            avoid = self.separate(avoid_others) * 2
+            avoid = self.separate(avoid_others) * 4
             self.acceleration += avoid
+            
+    def wander(self):
+        wander_radius = 25
+        wander_distance = 50
+        change = 0.3
 
+        self.wander_theta += random.uniform(-change, change)
+        circle_center = self.velocity.normalize() * wander_distance
+        displacement = Vector2(math.cos(self.wander_theta), math.sin(self.wander_theta)) * wander_radius
+        wander_force = circle_center + displacement
+        if wander_force.length() > self.max_force:
+            wander_force = wander_force.normalize() * self.max_force
+        return wander_force
+    
     def update(self):
         self.velocity += self.acceleration
         if self.velocity.length() > self.max_speed:
@@ -122,6 +141,8 @@ class Boid:
         self.flock(boids, avoid_others)
         if chase and target_pos is not None:
             self.acceleration += self.seek(Vector2(target_pos))
+        elif target_pos is None:
+            self.acceleration += self.wander()
         if evade_pos is not None:
             distance = self.position.distance_to(evade_pos)
             if distance < 100:
@@ -197,7 +218,7 @@ def main():
         for _ in range(num_blue):
             pos = center_blue + Vector2(random.uniform(-spread, spread), random.uniform(-spread, spread))
             flock_blue.add_boid(Boid(pos.x, pos.y, (0, 0, 255), width, height))
-    else:  # single
+    else: 
         pos = Vector2(width / 2, height / 2)
         flock_red.add_boid(Boid(pos.x, pos.y, (0, 255, 0), width, height))
 
