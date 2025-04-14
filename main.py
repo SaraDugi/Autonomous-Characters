@@ -1,6 +1,6 @@
 import pygame
-import random
 import math
+import random
 from pygame.math import Vector2
 from boid import Boid
 from flock import Flock
@@ -9,18 +9,30 @@ def draw_menu(screen, font):
     screen.fill((30, 30, 30))
     title = font.render("Choose Mode", True, (255, 255, 255))
     single = font.render("1 - Single Boid Mode", True, (200, 200, 200))
-    flock = font.render("2 - Flock Mode", True, (200, 200, 200))
+    flock_mode = font.render("2 - Flow Fields Mode", True, (200, 200, 200))
     screen.blit(title, (300, 200))
     screen.blit(single, (300, 260))
-    screen.blit(flock, (300, 300))
+    screen.blit(flock_mode, (300, 300))
     pygame.display.flip()
+
+def draw_flow_field(screen, width, height, spacing=40):
+    factor = 0.01
+    for y in range(0, height, spacing):
+        for x in range(0, width, spacing):
+            pos = Vector2(x, y)
+            angle = math.sin(x * factor) * math.cos(y * factor) * 2 * math.pi
+            flow_vector = Vector2(math.cos(angle), math.sin(angle))
+            arrow_length = spacing * 0.5
+            end_point = pos + flow_vector * arrow_length
+            pygame.draw.line(screen, (0, 255, 0), pos, end_point, 1)
+            pygame.draw.circle(screen, (0, 255, 0), (int(end_point.x), int(end_point.y)), 2)
 
 def generate_non_overlapping_boid(existing_boids, center, spread, color, width, height, min_distance=25):
     max_attempts = 100
     for _ in range(max_attempts):
         pos = center + Vector2(random.uniform(-spread, spread), random.uniform(-spread, spread))
-        too_close_to_boids = any(pos.distance_to(b.position) < min_distance for b in existing_boids)
-        if not too_close_to_boids:
+        too_close = any(pos.distance_to(b.position) < min_distance for b in existing_boids)
+        if not too_close:
             return Boid(pos.x, pos.y, color, width, height)
     return None
 
@@ -28,7 +40,7 @@ def main():
     pygame.init()
     width, height = 800, 600
     screen = pygame.display.set_mode((width, height))
-    pygame.display.set_caption("Boids Simulation")
+    pygame.display.set_caption("Boids Simulation with Flow Fields, FOV, and Cross-Flock Evasion")
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 36)
 
@@ -69,6 +81,8 @@ def main():
 
     target_pos = None
     selected_boid = None
+    show_flow = False  
+
     running = True
     while running:
         for event in pygame.event.get():
@@ -81,6 +95,9 @@ def main():
                     selected_boid = min(all_boids, key=lambda b: Vector2(event.pos).distance_to(b.position)) if all_boids else None
                 else:
                     selected_boid = None
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_v:
+                    show_flow = not show_flow
 
         red_center = flock_red.get_center()
         blue_center = flock_blue.get_center()
@@ -92,15 +109,22 @@ def main():
 
         screen.fill((10, 10, 30))
 
+        if show_flow and mode == 'flock':
+            draw_flow_field(screen, width, height)
+
         if target_pos:
             pygame.draw.circle(screen, (255, 255, 255), (int(target_pos[0]), int(target_pos[1])), 5, 1)
 
         for boid in flock_red.boids + flock_blue.boids:
             boid.draw(screen)
 
-        mode_text = f"Mode: {mode.capitalize()} (click to move)"
+        if mode == 'single':
+            mode_text = "Mode: Single (click to move)"
+        else:
+            mode_text = "Mode: Flow Fields with FOV & Cross-Flock Evasion (press V to toggle flow field)"
         text_surface = font.render(mode_text, True, (255, 255, 255))
         screen.blit(text_surface, (10, 10))
+
         pygame.display.flip()
         clock.tick(60)
 

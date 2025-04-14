@@ -1,9 +1,10 @@
 import pygame
-import math, random
+import math
+import random
 from pygame.math import Vector2
 
 class Boid:
-    def __init__(self, x, y, color, width, height, max_speed=2.5, max_force=0.1, radius=5):
+    def __init__(self, x, y, color, width, height, max_speed=2.5, max_force=0.1, radius=5, fov=math.radians(270)):
         self.position = Vector2(x, y)
         angle = random.uniform(0, 2 * math.pi)
         self.velocity = Vector2(math.cos(angle), math.sin(angle))
@@ -16,7 +17,20 @@ class Boid:
         self.width = width
         self.height = height
         self.wander_theta = random.uniform(0, 2 * math.pi)
-        
+        self.fov = fov
+
+    def in_fov(self, other):
+        direction = self.velocity.normalize() if self.velocity.length() != 0 else Vector2(1, 0)
+        to_other = other.position - self.position
+        if to_other.length() == 0:
+            return True
+        to_other_normalized = to_other.normalize()
+        dot = direction.dot(to_other_normalized)
+
+        dot = max(min(dot, 1), -1)
+        angle = math.acos(dot)
+        return angle < self.fov / 2
+
     def avoid_obstacles(self, obstacles):
         steer = Vector2(0, 0)
         for obs in obstacles:
@@ -65,6 +79,8 @@ class Boid:
         for other in boids:
             if other is self:
                 continue
+            if not self.in_fov(other):
+                continue
             d = self.position.distance_to(other.position)
             if 0 < d < desired_separation:
                 diff = self.position - other.position
@@ -87,6 +103,8 @@ class Boid:
         for other in boids:
             if other is self:
                 continue
+            if not self.in_fov(other):
+                continue
             d = self.position.distance_to(other.position)
             if 0 < d < neighbor_dist:
                 avg_vel += other.velocity
@@ -108,6 +126,8 @@ class Boid:
         for other in boids:
             if other is self:
                 continue
+            if not self.in_fov(other):
+                continue
             d = self.position.distance_to(other.position)
             if 0 < d < neighbor_dist:
                 center_of_mass += other.position
@@ -123,10 +143,11 @@ class Boid:
         coh = self.cohesion(boids) * 1.8
         self.acceleration = Vector2(0, 0)
         self.acceleration += sep + ali + coh
+
         if avoid_others:
             avoid = self.separate(avoid_others) * 4
             self.acceleration += avoid
-            
+
     def wander(self):
         wander_radius = 25
         wander_distance = 55
@@ -138,7 +159,16 @@ class Boid:
         if wander_force.length() > self.max_force:
             wander_force = wander_force.normalize() * self.max_force
         return wander_force
-    
+
+    def follow_flow_field(self):
+        factor = 0.01
+        angle = math.sin(self.position.x * factor) * math.cos(self.position.y * factor) * 2 * math.pi
+        desired = Vector2(math.cos(angle), math.sin(angle)) * self.max_speed
+        steer = desired - self.velocity
+        if steer.length() > self.max_force:
+            steer = steer.normalize() * self.max_force
+        return steer
+
     def update(self):
         self.velocity += self.acceleration
         if self.velocity.length() > self.max_speed:
@@ -163,10 +193,9 @@ class Boid:
             if distance < 100:
                 self.acceleration += self.flee(evade_pos) * (1 - distance / 100)
         if obstacles:
-            self.acceleration += self.avoid_obstacles(obstacles) * 2  # Weighted
+            self.acceleration += self.avoid_obstacles(obstacles) * 2
         self.update()
         self.borders()
-
 
     def draw(self, screen):
         angle = math.atan2(self.velocity.y, self.velocity.x)
