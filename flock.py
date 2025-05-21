@@ -1,6 +1,4 @@
-import pygame
 from pygame.math import Vector2
-from boid import Boid
 
 class Flock:
     def __init__(self, width, height):
@@ -23,6 +21,8 @@ class Flock:
             if mode == 'flock':
                 boid.flock(self.boids, avoid_others)
                 boid.acceleration += boid.follow_flow_field()
+                
+                #umikanje glede na blizino
                 if avoid_others:
                     for other in avoid_others:
                         d = boid.position.distance_to(other.position)

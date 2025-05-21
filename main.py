@@ -40,7 +40,7 @@ def main():
     pygame.init()
     width, height = 800, 600
     screen = pygame.display.set_mode((width, height))
-    pygame.display.set_caption("Boids Simulation with Flow Fields, FOV, and Cross-Flock Evasion")
+    pygame.display.set_caption("Boids Simulation")
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 36)
 
@@ -102,11 +102,9 @@ def main():
         red_center = flock_red.get_center()
         blue_center = flock_blue.get_center()
 
-        flock_red.run(target_pos=target_pos, mode=mode, selected_boid=selected_boid,
-                      evade_pos=blue_center, avoid_others=flock_blue.boids)
-        flock_blue.run(target_pos=target_pos, mode=mode, selected_boid=selected_boid,
-                       evade_pos=red_center, avoid_others=flock_red.boids)
-
+        #:))
+        flock_red.run(target_pos=target_pos, mode=mode, selected_boid=selected_boid, evade_pos=blue_center, avoid_others=flock_blue.boids)
+        flock_blue.run(target_pos=target_pos, mode=mode, selected_boid=selected_boid, evade_pos=red_center, avoid_others=flock_red.boids)
         screen.fill((10, 10, 30))
 
         if show_flow and mode == 'flock':
@@ -121,7 +119,7 @@ def main():
         if mode == 'single':
             mode_text = "Mode: Single (click to move)"
         else:
-            mode_text = "Mode: Flow Fields with FOV & Cross-Flock Evasion (press V to toggle flow field)"
+            mode_text = "Mode: Flow Fields (press V to toggle flow field)"
         text_surface = font.render(mode_text, True, (255, 255, 255))
         screen.blit(text_surface, (10, 10))
 
